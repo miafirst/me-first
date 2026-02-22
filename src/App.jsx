@@ -170,11 +170,21 @@ const Popup = ({open,onClose,title,children}) => (
 );
 
 // ─── SwipeableRow — swipe left to reveal Edit + Delete ───────────────────────
-function SwipeableRow({ onEdit, onDelete, children }) {
-  const [offset, setOffset] = useState(0);
-  const [swiped, setSwiped] = useState(false);
+function SwipeableRow({ onEdit, onDelete, children, hintOnMount=false }) {
+  const [offset, setOffset]   = useState(0);
+  const [swiped, setSwiped]   = useState(false);
+  const [hinted, setHinted]   = useState(false);
   const startX = React.useRef(null);
   const ACTION_W = 130;
+
+  // Hint animation: nudge left then snap back on first transaction
+  useEffect(() => {
+    if (!hintOnMount || hinted) return;
+    const t1 = setTimeout(() => setOffset(-48), 600);
+    const t2 = setTimeout(() => setOffset(0),   1100);
+    setHinted(true);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [hintOnMount]);
 
   function onTouchStart(e) { startX.current = e.touches[0].clientX; }
   function onTouchMove(e) {
@@ -191,7 +201,6 @@ function SwipeableRow({ onEdit, onDelete, children }) {
 
   return (
     <div style={{ position:"relative", overflow:"hidden", borderRadius:14 }}>
-      {/* Action buttons behind */}
       <div style={{ position:"absolute", right:0, top:0, bottom:0, width:ACTION_W, display:"flex" }}>
         <button onClick={()=>{ close(); onEdit(); }} style={{ flex:1, background:T.sand, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4 }}>
           <Icon name="edit" size={16} color={T.white}/>
@@ -202,11 +211,10 @@ function SwipeableRow({ onEdit, onDelete, children }) {
           <span style={{ fontFamily:T.sans, fontSize:10, color:T.white, fontWeight:500 }}>Delete</span>
         </button>
       </div>
-      {/* Main row */}
       <div
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
         onClick={swiped ? close : undefined}
-        style={{ transform:`translateX(${offset}px)`, transition:startX.current?'none':'transform 0.22s ease', position:"relative", zIndex:1 }}
+        style={{ transform:`translateX(${offset}px)`, transition:startX.current?'none':'transform 0.35s ease', position:"relative", zIndex:1 }}
       >
         {children}
       </div>
@@ -225,6 +233,22 @@ function EmptyState({ emoji, title, subtitle, action, onAction }) {
     </div>
   );
 }
+
+// ─── Toast — brief save confirmation ─────────────────────────────────────────
+function Toast({ message, visible }) {
+  return (
+    <div style={{
+      position:"fixed", bottom:90, left:"50%", transform:`translateX(-50%) translateY(${visible?0:16}px)`,
+      opacity:visible?1:0, transition:"all 0.25s ease", zIndex:500, pointerEvents:"none",
+      background:T.ink, color:T.cream, borderRadius:100, padding:"10px 20px",
+      fontFamily:T.sans, fontSize:13, fontWeight:500, whiteSpace:"nowrap",
+      boxShadow:"0 4px 20px rgba(46,37,32,0.25)", display:"flex", alignItems:"center", gap:8,
+    }}>
+      <span style={{color:T.sage}}>✓</span> {message}
+    </div>
+  );
+}
+
 export default function MeFirst() {
   const [tab,   setTab]   = useState("home");
   const [ready, setReady] = useState(false);
@@ -260,6 +284,12 @@ export default function MeFirst() {
   const [periodIdx,    setPeriodIdx]    = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
   const [newCatName,   setNewCatName]   = useState("");
+  const [toast,        setToast]        = useState({visible:false,message:""});
+
+  function showToast(msg) {
+    setToast({visible:true,message:msg});
+    setTimeout(()=>setToast(t=>({...t,visible:false})),2000);
+  }
 
   // form drafts
   const today = new Date().toISOString().split("T")[0];
@@ -307,32 +337,32 @@ export default function MeFirst() {
     if (!draftSpend.amount) return;
     setSpending(s=>[...s,{id:Date.now(),...draftSpend,amount:parseFloat(draftSpend.amount)}]);
     setDraftSpend({category:spendCats[0]||"Other",amount:"",date:today,recurring:false});
-    setSheet(null);
+    setSheet(null); showToast("Expense saved");
   }
   function saveSpend() {
     setSpending(s=>s.map(x=>x.id===editSpend.id?editSpend:x));
-    setEditSpend(null); setSheet(null);
+    setEditSpend(null); setSheet(null); showToast("Expense updated");
   }
   function addWish() {
     if (!draftWish.name||!draftWish.price) return;
     setWishlist(w=>[...w,{id:Date.now(),...draftWish,price:parseFloat(draftWish.price),daysWanted:0,quizScore:null}]);
-    setDraftWish({name:"",price:"",category:"Fashion"}); setSheet(null);
+    setDraftWish({name:"",price:"",category:"Fashion"}); setSheet(null); showToast("Added to wishlist");
   }
   function addGoal() {
     if (!draftGoal.name||!draftGoal.target) return;
     setGoals(g=>[...g,{id:Date.now(),name:draftGoal.name,target:parseFloat(draftGoal.target),current:parseFloat(draftGoal.current)||0}]);
-    setDraftGoal({name:"",target:"",current:""}); setSheet(null);
+    setDraftGoal({name:"",target:"",current:""}); setSheet(null); showToast("Goal created");
   }
-  function saveGoal() { setGoals(g=>g.map(x=>x.id===editGoal.id?editGoal:x)); setEditGoal(null); setSheet(null); }
-  function deleteGoal() { setGoals(g=>g.filter(x=>x.id!==editGoal.id)); setEditGoal(null); setSheet(null); }
+  function saveGoal() { setGoals(g=>g.map(x=>x.id===editGoal.id?editGoal:x)); setEditGoal(null); setSheet(null); showToast("Goal updated"); }
+  function deleteGoal() { setGoals(g=>g.filter(x=>x.id!==editGoal.id)); setEditGoal(null); setSheet(null); showToast("Goal deleted"); }
 
   function addRecurring() {
     if (!draftRecurr.name||!draftRecurr.amount) return;
     setRecurring(r=>[...r,{id:Date.now(),...draftRecurr,amount:parseFloat(draftRecurr.amount)}]);
-    setDraftRecurr({name:"",category:spendCats[0]||"Other",amount:"",dayOfMonth:1}); setSheet(null);
+    setDraftRecurr({name:"",category:spendCats[0]||"Other",amount:"",dayOfMonth:1}); setSheet(null); showToast("Recurring expense added");
   }
-  function saveRecurring() { setRecurring(r=>r.map(x=>x.id===editRecurr.id?editRecurr:x)); setEditRecurr(null); setSheet(null); }
-  function deleteRecurring() { setRecurring(r=>r.filter(x=>x.id!==editRecurr.id)); setEditRecurr(null); setSheet(null); }
+  function saveRecurring() { setRecurring(r=>r.map(x=>x.id===editRecurr.id?editRecurr:x)); setEditRecurr(null); setSheet(null); showToast("Recurring updated"); }
+  function deleteRecurring() { setRecurring(r=>r.filter(x=>x.id!==editRecurr.id)); setEditRecurr(null); setSheet(null); showToast("Recurring deleted"); }
 
   function addSpendCat() {
     if (!newCatName.trim()||spendCats.includes(newCatName.trim())) return;
@@ -577,12 +607,10 @@ export default function MeFirst() {
             {/* Transactions — swipe left to edit/delete */}
             {curPeriod.items.length>0 && (
               <>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
-                  <div style={{fontStyle:"italic",fontSize:16,opacity:0.6}}>Transactions</div>
-                  <div style={{fontFamily:T.sans,fontSize:10,color:T.inkLight,opacity:0.5}}>← swipe to edit</div>
-                </div>
-                {[...curPeriod.items].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>(
+                <div style={{fontStyle:"italic",fontSize:16,opacity:0.6,marginTop:4}}>Transactions</div>
+                {[...curPeriod.items].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((s,idx)=>(
                   <SwipeableRow key={s.id}
+                    hintOnMount={idx===0}
                     onEdit={()=>{setEditSpend({...s});setSheet("editSpend");}}
                     onDelete={()=>setSpending(sp=>sp.filter(x=>x.id!==s.id))}
                   >
@@ -634,12 +662,29 @@ export default function MeFirst() {
               <h2 style={{fontStyle:"italic",fontWeight:300,fontSize:26}}>Savings Goals</h2>
               <Btn variant="primary" icon="plus" onClick={()=>setSheet("addGoal")}>Add</Btn>
             </div>
-            <Card style={{background:T.paper}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-                <div><Label>Total saved</Label><div style={{fontSize:24,fontWeight:300,fontStyle:"italic",color:T.sage}}>{fmt(goals.reduce((a,g)=>a+g.current,0))}</div></div>
-                <div><Label>Total target</Label><div style={{fontSize:24,fontWeight:300,fontStyle:"italic"}}>{fmt(goals.reduce((a,g)=>a+g.target,0))}</div></div>
-              </div>
-            </Card>
+            {goals.length>0 && (() => {
+              const totalSaved  = goals.reduce((a,g)=>a+g.current,0);
+              const totalTarget = goals.reduce((a,g)=>a+g.target,0);
+              const overallPct  = totalTarget>0 ? Math.min(totalSaved/totalTarget*100,100) : 0;
+              return (
+                <Card style={{background:T.ink,color:T.cream}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:12}}>
+                    <div>
+                      <Label style={{color:"rgba(250,246,240,0.4)"}}>Total saved</Label>
+                      <div style={{fontSize:28,fontWeight:300,fontStyle:"italic",color:T.sage}}>{fmt(totalSaved)}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <Label style={{color:"rgba(250,246,240,0.4)"}}>Target</Label>
+                      <div style={{fontSize:18,fontWeight:300,fontStyle:"italic",opacity:0.6}}>{fmt(totalTarget)}</div>
+                    </div>
+                  </div>
+                  <div style={{height:8,borderRadius:100,background:"rgba(255,255,255,0.15)",overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${overallPct}%`,background:T.sage,borderRadius:100,transition:"width 0.8s ease"}}/>
+                  </div>
+                  <div style={{fontFamily:T.sans,fontSize:11,opacity:0.4,marginTop:6,textAlign:"right"}}>{Math.round(overallPct)}% of all goals</div>
+                </Card>
+              );
+            })()}
             {goals.length===0&&(
               <EmptyState
                 emoji="🌱"
@@ -1026,6 +1071,9 @@ export default function MeFirst() {
           </div>
         )}
       </Popup>
+
+      {/* Toast notification */}
+      <Toast message={toast.message} visible={toast.visible}/>
     </div>
   );
 }
