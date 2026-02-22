@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 function load(key, fallback) {
@@ -11,10 +11,10 @@ function save(key, value) {
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const T = {
-  cream:"#faf6f0", paper:"#f5ede3", ink:"#2e2520", inkLight:"#8a7060",
-  border:"#e8ddd4", white:"#ffffff", sage:"#7a9e7e", clay:"#b8796a",
-  sand:"#c4a882", mist:"#a8b5c8", blush:"#c4a0b0", teal:"#7a9ea0",
-  serif:"'Cormorant Garamond', Georgia, serif", sans:"'DM Sans', sans-serif",
+  cream:    "#faf6f0", paper:    "#f5ede3", ink:      "#2e2520", inkLight: "#8a7060",
+  border:   "#e8ddd4", white:    "#ffffff", sage:     "#7a9e7e", clay:     "#b8796a",
+  sand:     "#c4a882", mist:     "#a8b5c8", blush:    "#c4a0b0", teal:     "#7a9ea0",
+  serif:    "'Cormorant Garamond', Georgia, serif", sans: "'DM Sans', sans-serif",
 };
 
 const BUDGET_COLORS = [T.sage, T.sand, T.clay, T.mist, T.blush, T.teal, "#b5a0c4", "#a0b8b5", "#c4b5a0", "#8a9eb5"];
@@ -169,7 +169,62 @@ const Popup = ({open,onClose,title,children}) => (
   </>
 );
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
+// ─── SwipeableRow — swipe left to reveal Edit + Delete ───────────────────────
+function SwipeableRow({ onEdit, onDelete, children }) {
+  const [offset, setOffset] = useState(0);
+  const [swiped, setSwiped] = useState(false);
+  const startX = React.useRef(null);
+  const ACTION_W = 130;
+
+  function onTouchStart(e) { startX.current = e.touches[0].clientX; }
+  function onTouchMove(e) {
+    if (startX.current === null) return;
+    const dx = e.touches[0].clientX - startX.current;
+    if (dx < 0) setOffset(Math.max(dx, -ACTION_W));
+  }
+  function onTouchEnd() {
+    if (offset < -ACTION_W / 2) { setOffset(-ACTION_W); setSwiped(true); }
+    else { setOffset(0); setSwiped(false); }
+    startX.current = null;
+  }
+  function close() { setOffset(0); setSwiped(false); }
+
+  return (
+    <div style={{ position:"relative", overflow:"hidden", borderRadius:14 }}>
+      {/* Action buttons behind */}
+      <div style={{ position:"absolute", right:0, top:0, bottom:0, width:ACTION_W, display:"flex" }}>
+        <button onClick={()=>{ close(); onEdit(); }} style={{ flex:1, background:T.sand, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4 }}>
+          <Icon name="edit" size={16} color={T.white}/>
+          <span style={{ fontFamily:T.sans, fontSize:10, color:T.white, fontWeight:500 }}>Edit</span>
+        </button>
+        <button onClick={()=>{ close(); onDelete(); }} style={{ flex:1, background:T.clay, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, borderRadius:"0 14px 14px 0" }}>
+          <Icon name="trash" size={16} color={T.white}/>
+          <span style={{ fontFamily:T.sans, fontSize:10, color:T.white, fontWeight:500 }}>Delete</span>
+        </button>
+      </div>
+      {/* Main row */}
+      <div
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onClick={swiped ? close : undefined}
+        style={{ transform:`translateX(${offset}px)`, transition:startX.current?'none':'transform 0.22s ease', position:"relative", zIndex:1 }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── EmptyState — guides new users ───────────────────────────────────────────
+function EmptyState({ emoji, title, subtitle, action, onAction }) {
+  return (
+    <div style={{ textAlign:"center", padding:"48px 20px", display:"grid", gap:12 }}>
+      <div style={{ fontSize:40 }}>{emoji}</div>
+      <div style={{ fontFamily:T.serif, fontStyle:"italic", fontSize:20, color:T.ink }}>{title}</div>
+      <div style={{ fontFamily:T.sans, fontSize:13, color:T.inkLight, lineHeight:1.6 }}>{subtitle}</div>
+      {action && <Btn variant="primary" style={{ margin:"8px auto 0" }} icon="plus" onClick={onAction}>{action}</Btn>}
+    </div>
+  );
+}
 export default function MeFirst() {
   const [tab,   setTab]   = useState("home");
   const [ready, setReady] = useState(false);
@@ -357,11 +412,11 @@ export default function MeFirst() {
                   <div style={{fontFamily:T.sans,fontSize:12,opacity:0.4}}>{payday.toLocaleDateString("en-GB",{day:"numeric",month:"long"})}</div>
                   <div style={{marginTop:6,fontFamily:T.sans,fontSize:13}}>
                     <span style={{opacity:0.45}}>left to spend </span>
-                    <span style={{color:remaining>=0?"#a8d4a0":"#d4a0a0",fontWeight:500}}>{fmt(remaining)}</span>
+                    <span style={{color:remaining>=0?"#8EB9FF":"#902124",fontWeight:500}}>{fmt(remaining)}</span>
                   </div>
                   <div style={{marginTop:4,fontFamily:T.sans,fontSize:11,opacity:0.35}}>
                     if you save €15/day<br/>
-                    <span style={{color:"#a8d4a0"}}>+{fmt(15*daysLeft)} by payday</span>
+                    <span style={{color:"#8EB9FF"}}>+{fmt(15*daysLeft)} by payday</span>
                   </div>
                 </div>
               </div>
@@ -388,6 +443,19 @@ export default function MeFirst() {
                   </div>
                 </Card>
               </>
+            )}
+
+            {/* Welcome state — brand new user */}
+            {spending.length===0 && goals.length===0 && (
+              <Card style={{background:T.paper}}>
+                <div style={{fontFamily:T.sans,fontSize:13,color:T.inkLight,lineHeight:1.7}}>
+                  <strong style={{fontFamily:T.serif,fontStyle:"italic",fontSize:16,color:T.ink,display:"block",marginBottom:6}}>Welcome to me, first.</strong>
+                  Here's how to get started:<br/>
+                  <span style={{display:"block",marginTop:6}}>① Tap <strong>⚙ Settings</strong> — add your income, hours and payday</span>
+                  <span style={{display:"block",marginTop:4}}>② Go to <strong>Savings</strong> — create your first goal</span>
+                  <span style={{display:"block",marginTop:4}}>③ Go to <strong>Spending</strong> — log your first expense</span>
+                </div>
+              </Card>
             )}
 
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
@@ -457,6 +525,40 @@ export default function MeFirst() {
               </div>
             </Card>
 
+            {/* Recurring — visible in main flow */}
+            {recurring.length>0 && (
+              <Card style={{background:T.paper,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <Icon name="repeat" size={16} color={T.inkLight}/>
+                    <Label style={{marginBottom:0}}>Recurring this month</Label>
+                  </div>
+                  <button onClick={()=>setSheet("settings")} style={{background:"none",border:"none",cursor:"pointer",fontFamily:T.sans,fontSize:11,color:T.inkLight}}>Manage</button>
+                </div>
+                {recurring.map(r=>(
+                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{fontFamily:T.sans,fontSize:13}}>{r.name}
+                      <span style={{fontSize:11,color:T.inkLight,marginLeft:6}}>· day {r.dayOfMonth}</span>
+                    </div>
+                    <span style={{fontFamily:T.sans,fontSize:13,fontWeight:500,color:T.clay}}>{fmt(r.amount)}</span>
+                  </div>
+                ))}
+                <div style={{borderTop:`1px solid ${T.border}`,paddingTop:8,marginTop:4,display:"flex",justifyContent:"space-between",fontFamily:T.sans,fontSize:13}}>
+                  <span style={{color:T.inkLight}}>Monthly total</span>
+                  <span style={{fontWeight:600}}>{fmt(recurring.reduce((a,r)=>a+r.amount,0))}</span>
+                </div>
+              </Card>
+            )}
+
+            {/* Add first recurring nudge — only when no recurring yet */}
+            {recurring.length===0 && spending.length>0 && (
+              <button onClick={()=>setSheet("settings")} style={{background:"none",border:`1.5px dashed ${T.border}`,borderRadius:14,padding:"12px 16px",cursor:"pointer",display:"flex",gap:10,alignItems:"center",width:"100%"}}>
+                <Icon name="repeat" size={16} color={T.inkLight}/>
+                <span style={{fontFamily:T.sans,fontSize:13,color:T.inkLight}}>Add recurring expenses like rent or subscriptions</span>
+                <Icon name="chevron" size={16} color={T.inkLight} style={{marginLeft:"auto"}}/>
+              </button>
+            )}
+
             {/* Category breakdown */}
             {Object.entries(spentByCat).length>0 && (
               <Card>
@@ -472,36 +574,54 @@ export default function MeFirst() {
               </Card>
             )}
 
-            {/* Transactions — tappable to edit */}
-            <div style={{fontStyle:"italic",fontSize:16,opacity:0.6,marginTop:4}}>Transactions</div>
-            {[...curPeriod.items].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>(
-              <div key={s.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:T.white,borderRadius:14,padding:"12px 14px",boxShadow:`0 1px 8px rgba(46,37,32,0.06)`}}>
-                <div style={{display:"flex",gap:12,alignItems:"center",flex:1}} onClick={()=>{setEditSpend({...s});setSheet("editSpend");}}>
-                  <div style={{background:T.paper,borderRadius:10,width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:T.sans,fontSize:10,color:T.inkLight,fontWeight:500,textAlign:"center",lineHeight:1.2,padding:4,flexShrink:0}}>
-                    {s.category.slice(0,5)}
-                  </div>
-                  <div>
-                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <div style={{fontFamily:T.sans,fontSize:14,fontWeight:500}}>{s.category}</div>
-                      {s.recurring&&<Icon name="repeat" size={12} color={T.inkLight}/>}
-                    </div>
-                    <div style={{fontFamily:T.sans,fontSize:11,color:T.inkLight}}>
-                      {new Date(s.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
-                      <span style={{marginLeft:6,opacity:0.5}}>tap to edit</span>
-                    </div>
-                  </div>
+            {/* Transactions — swipe left to edit/delete */}
+            {curPeriod.items.length>0 && (
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+                  <div style={{fontStyle:"italic",fontSize:16,opacity:0.6}}>Transactions</div>
+                  <div style={{fontFamily:T.sans,fontSize:10,color:T.inkLight,opacity:0.5}}>← swipe to edit</div>
                 </div>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <div style={{fontFamily:T.sans,fontSize:15,fontWeight:500,color:T.clay}}>{fmt(s.amount)}</div>
-                  <button onClick={()=>setSpending(sp=>sp.filter(x=>x.id!==s.id))} style={{background:"none",border:"none",cursor:"pointer",padding:4,opacity:0.3}}>
-                    <Icon name="close" size={16} color={T.ink}/>
-                  </button>
-                </div>
-              </div>
-            ))}
-            {curPeriod.items.length===0&&(
-              <Card style={{textAlign:"center",padding:40}}>
-                <div style={{fontStyle:"italic",fontSize:16,opacity:0.4}}>No spending this period</div>
+                {[...curPeriod.items].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>(
+                  <SwipeableRow key={s.id}
+                    onEdit={()=>{setEditSpend({...s});setSheet("editSpend");}}
+                    onDelete={()=>setSpending(sp=>sp.filter(x=>x.id!==s.id))}
+                  >
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:T.white,padding:"12px 14px",boxShadow:`0 1px 8px rgba(46,37,32,0.06)`}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center",flex:1}}>
+                        <div style={{background:T.paper,borderRadius:10,width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:T.sans,fontSize:10,color:T.inkLight,fontWeight:500,textAlign:"center",lineHeight:1.2,padding:4,flexShrink:0}}>
+                          {s.category.slice(0,5)}
+                        </div>
+                        <div>
+                          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                            <div style={{fontFamily:T.sans,fontSize:14,fontWeight:500}}>{s.category}</div>
+                            {s.recurring&&<Icon name="repeat" size={12} color={T.inkLight}/>}
+                          </div>
+                          <div style={{fontFamily:T.sans,fontSize:11,color:T.inkLight}}>
+                            {new Date(s.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{fontFamily:T.sans,fontSize:15,fontWeight:500,color:T.clay}}>{fmt(s.amount)}</div>
+                    </div>
+                  </SwipeableRow>
+                ))}
+              </>
+            )}
+
+            {/* Empty state */}
+            {curPeriod.items.length===0 && spending.length===0 && (
+              <EmptyState
+                emoji="💸"
+                title="No expenses yet"
+                subtitle={"Log your first expense to start tracking.\nEven a coffee counts."}
+                action="Log first expense"
+                onAction={()=>setSheet("addSpend")}
+              />
+            )}
+            {curPeriod.items.length===0 && spending.length>0 && (
+              <Card style={{textAlign:"center",padding:32}}>
+                <div style={{fontStyle:"italic",fontSize:16,opacity:0.4,marginBottom:8}}>Nothing logged this period</div>
+                <Btn variant="outline" style={{margin:"0 auto"}} icon="plus" onClick={()=>setSheet("addSpend")}>Add expense</Btn>
               </Card>
             )}
           </div>
@@ -520,7 +640,15 @@ export default function MeFirst() {
                 <div><Label>Total target</Label><div style={{fontSize:24,fontWeight:300,fontStyle:"italic"}}>{fmt(goals.reduce((a,g)=>a+g.target,0))}</div></div>
               </div>
             </Card>
-            {goals.length===0&&<Card style={{textAlign:"center",padding:40}}><div style={{fontStyle:"italic",fontSize:16,opacity:0.4}}>No savings goals yet</div></Card>}
+            {goals.length===0&&(
+              <EmptyState
+                emoji="🌱"
+                title="No goals yet"
+                subtitle="What are you saving towards? A trip, an emergency fund, something you've been dreaming of?"
+                action="Create first goal"
+                onAction={()=>setSheet("addGoal")}
+              />
+            )}
             {goals.map(g=>{
               const pct=Math.min(g.current/g.target*100,100);
               const daysTo=g.current>=g.target?0:Math.ceil((g.target-g.current)/15);
@@ -557,7 +685,15 @@ export default function MeFirst() {
                 <span style={{fontSize:11,opacity:0.6}}> · {fmt(monthlyPay)} / {monthlyHours}h</span>
               </div>
             </Card>
-            {wishlist.length===0&&<Card style={{textAlign:"center",padding:40}}><div style={{fontStyle:"italic",fontSize:16,opacity:0.4}}>Your wishlist is empty</div></Card>}
+            {wishlist.length===0&&(
+              <EmptyState
+                emoji="✨"
+                title="Your wishlist is empty"
+                subtitle="Add things you're tempted to buy. The impulse quiz will tell you if you really need it — or if you're just having a moment."
+                action="Add first item"
+                onAction={()=>setSheet("addWish")}
+              />
+            )}
             {wishlist.map(item=>{
               const score=impulseScore(item.daysWanted,item.quizScore);
               const {text,color}=impulseLabel(score);
@@ -582,7 +718,7 @@ export default function MeFirst() {
                     <div style={{display:"flex",justifyContent:"space-between",fontFamily:T.sans,fontSize:10,color:T.inkLight,marginBottom:6}}>
                       <span>Impulse</span><Pill color={color}>{text}</Pill><span>Go for it</span>
                     </div>
-                    <div style={{height:8,borderRadius:100,background:`linear-gradient(to right,${T.clay},#d4a060,#8aab7a,${T.sage})`,position:"relative"}}>
+                    <div style={{height:8,borderRadius:100,background:`linear-gradient(to right,#902124,#C2858C,#8EB9FF,#4D0011)`,position:"relative"}}>
                       <div style={{position:"absolute",top:-5,left:`${score}%`,transform:"translateX(-50%)",width:18,height:18,borderRadius:"50%",background:T.white,border:`2.5px solid ${T.ink}`,boxShadow:"0 2px 6px rgba(0,0,0,0.18)",transition:"left 0.7s ease"}}/>
                     </div>
                   </div>
@@ -617,7 +753,7 @@ export default function MeFirst() {
                 </div>
                 <div style={{textAlign:"right"}}>
                   <Label style={{color:"rgba(250,246,240,0.4)"}}>Period spent</Label>
-                  <div style={{fontSize:28,fontWeight:300,fontStyle:"italic",color:periodSpend>monthlyPay?"#d4a0a0":"#a8d4a0"}}>{fmt(periodSpend)}</div>
+                  <div style={{fontSize:28,fontWeight:300,fontStyle:"italic",color:periodSpend>monthlyPay?"#902124":"#8EB9FF"}}>{fmt(periodSpend)}</div>
                 </div>
               </div>
               <div style={{fontFamily:T.sans,fontSize:10,opacity:0.3,marginTop:8}}>{curPeriod.label||"current period"}</div>
@@ -795,7 +931,7 @@ export default function MeFirst() {
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <Btn variant="outline" style={{width:"100%"}} onClick={()=>setConfirmClear(false)}>Cancel</Btn>
-                  <Btn variant="danger" style={{width:"100%",background:T.clay,color:T.cream}} onClick={clearAllData}>Yes, clear</Btn>
+                  <Btn variant="danger" style={{width:"100%",background:"#902124",color:T.cream}} onClick={clearAllData}>Yes, clear</Btn>
                 </div>
               </div>
             )}
@@ -845,8 +981,13 @@ export default function MeFirst() {
                 <div style={{flex:1}}><Bar pct={b.pct*5} color={b.color}/></div>
                 <div style={{fontFamily:T.sans,fontSize:11,color:T.inkLight}}>%</div>
               </div>
-              {/* Category mapping */}
-              <Label>Spending categories included</Label>
+              {/* Category mapping — with guidance */}
+              <div style={{background:`${b.color}11`,borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                <div style={{fontFamily:T.sans,fontSize:11,color:T.inkLight,lineHeight:1.5}}>
+                  <strong style={{color:T.ink}}>Which spending categories count towards {b.label}?</strong><br/>
+                  Tap a category to include or exclude it from this budget line's reality check.
+                </div>
+              </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                 {spendCats.map(cat=>{
                   const included=(b.cats||[]).includes(cat);
