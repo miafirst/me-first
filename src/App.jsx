@@ -1,14 +1,35 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── Storage (window.storage API — works in Claude artifact environment) ──────
+// ─── Storage ──────────────────────────────────────────────────────────────────
+// Tries window.storage (Claude artifact API), falls back to localStorage, then to null
+const hasWindowStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
+
 async function storageGet(key) {
+  if (hasWindowStorage) {
+    try {
+      const result = await window.storage.get(key);
+      return result && result.value != null ? JSON.parse(result.value) : null;
+    } catch { /* key not found or parse error */ }
+  }
+  // localStorage fallback (works outside artifact sandbox)
   try {
-    const result = await window.storage.get(key);
-    return result ? JSON.parse(result.value) : null;
+    const v = localStorage.getItem(key);
+    return v != null ? JSON.parse(v) : null;
   } catch { return null; }
 }
+
 async function storageSet(key, value) {
-  try { await window.storage.set(key, JSON.stringify(value)); } catch {}
+  if (hasWindowStorage) {
+    try { await window.storage.set(key, JSON.stringify(value)); return; } catch {}
+  }
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+async function storageDelete(key) {
+  if (hasWindowStorage) {
+    try { await window.storage.delete(key); return; } catch {}
+  }
+  try { localStorage.removeItem(key); } catch {}
 }
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
@@ -95,8 +116,14 @@ function impulseLabel(score) {
 
 // FIX #2: getPayPeriods — make end boundary INCLUSIVE by bumping end by 1ms
 // so transactions on exact payday date are not lost between periods
+// Parse a YYYY-MM-DD date string as LOCAL midnight (not UTC midnight)
+// This prevents dates shifting a day backwards in UTC+ timezones
+function localDate(str) {
+  return new Date(str + "T00:00:00");
+}
+
 function getPayPeriods(spending, nextPayday) {
-  const pd = new Date(nextPayday);
+  const pd = localDate(nextPayday); // FIX: local midnight, not UTC
   const periods = [];
   let end = new Date(pd);
   for (let i=0; i<6; i++) {
@@ -111,7 +138,7 @@ function getPayPeriods(spending, nextPayday) {
       label: p.start.toLocaleDateString("en-GB",{day:"numeric",month:"short"}) + " – " + p.end.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
       start: p.start, end: p.end,
       items: spending.filter(s => {
-        const d = new Date(s.date);
+        const d = localDate(s.date); // FIX: local midnight, not UTC
         return d >= p.start && d < endInclusive;
       }),
     };
@@ -356,32 +383,43 @@ export default function MeFirst() {
     setTimeout(()=>setToast(t=>({...t,visible:false})),2000);
   }
 
-  // ── FIX: Persistence via window.storage (async) ──
+  // ── Persistence: load from storage on mount ──
   useEffect(()=>{
+    let cancelled = false;
+    // Safety net: if storage takes >2s (or fails entirely), show the app anyway
+    const fallbackTimer = setTimeout(() => { if (!cancelled) setReady(true); }, 2000);
     async function loadAll() {
-      const [pay, hours, pday, scats, gs, wl, sp, rec, bud] = await Promise.all([
-        storageGet("mf:pay"),
-        storageGet("mf:hours"),
-        storageGet("mf:paydayday"),
-        storageGet("mf:spendcats"),
-        storageGet("mf:goals"),
-        storageGet("mf:wishlist"),
-        storageGet("mf:spending"),
-        storageGet("mf:recurring"),
-        storageGet("mf:budget"),
-      ]);
-      if (pay    != null) setMonthlyPay(pay);
-      if (hours  != null) setMonthlyHours(hours);
-      if (pday   != null) setPaydayDay(pday);
-      if (scats  != null) setSpendCats(scats);
-      if (gs     != null) setGoals(gs);
-      if (wl     != null) setWishlist(wl);
-      if (sp     != null) setSpending(sp);
-      if (rec    != null) setRecurring(rec);
-      if (bud    != null) setBudget(bud);
-      setReady(true);
+      try {
+        const [pay, hours, pday, scats, gs, wl, sp, rec, bud] = await Promise.all([
+          storageGet("mf:pay"),
+          storageGet("mf:hours"),
+          storageGet("mf:paydayday"),
+          storageGet("mf:spendcats"),
+          storageGet("mf:goals"),
+          storageGet("mf:wishlist"),
+          storageGet("mf:spending"),
+          storageGet("mf:recurring"),
+          storageGet("mf:budget"),
+        ]);
+        if (cancelled) return;
+        if (pay    != null) setMonthlyPay(pay);
+        if (hours  != null) setMonthlyHours(hours);
+        if (pday   != null) setPaydayDay(pday);
+        if (scats  != null) setSpendCats(scats);
+        if (gs     != null) setGoals(gs);
+        if (wl     != null) setWishlist(wl);
+        if (sp     != null) setSpending(sp);
+        if (rec    != null) setRecurring(rec);
+        if (bud    != null) setBudget(bud);
+      } catch(e) {
+        console.warn("Storage load failed:", e);
+      } finally {
+        clearTimeout(fallbackTimer);
+        if (!cancelled) setReady(true);
+      }
     }
     loadAll();
+    return () => { cancelled = true; clearTimeout(fallbackTimer); };
   },[]);
 
   useEffect(()=>{ if(ready) storageSet("mf:pay",       monthlyPay);   },[monthlyPay,  ready]);
@@ -395,8 +433,11 @@ export default function MeFirst() {
   useEffect(()=>{ if(ready) storageSet("mf:budget",    budget);       },[budget,      ready]);
 
   // ── Computed ──
-  const payday      = new Date(nextPayday);
-  const daysLeft    = Math.max(Math.ceil((payday-new Date())/86400000),0);
+  // FIX: parse as LOCAL midnight — new Date("YYYY-MM-DD") parses UTC midnight,
+  // which in UTC+ zones shifts the date backwards by hours, showing the wrong day
+  const payday      = localDate(nextPayday);
+  const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+  const daysLeft    = Math.max(Math.ceil((payday - todayMidnight) / 86400000), 0);
   const periods     = getPayPeriods(spending,nextPayday);
   const curPeriod   = periods[periodIdx]||{items:spending,label:"All time"};
   const periodItems = curPeriod.items.filter(s=>s.type==="Expense"||!s.type);
@@ -481,9 +522,7 @@ export default function MeFirst() {
     setPeriodIdx(0); setExpandedBucket(null);
     // Clear persisted storage
     ["mf:goals","mf:wishlist","mf:spending","mf:recurring","mf:budget",
-     "mf:pay","mf:hours","mf:paydayday","mf:spendcats"].forEach(k=>{
-      try{ window.storage.delete(k); }catch{}
-    });
+     "mf:pay","mf:hours","mf:paydayday","mf:spendcats"].forEach(k=>storageDelete(k));
     setConfirmClear(false); setSheet(null);
   }
 
@@ -698,7 +737,7 @@ export default function MeFirst() {
             {curPeriod.items.length>0 && (
               <>
                 <div style={{fontStyle:"italic",fontSize:16,opacity:0.6,marginTop:4}}>Transactions</div>
-                {[...curPeriod.items].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((s,idx)=>{
+                {[...curPeriod.items].sort((a,b)=>localDate(b.date)-localDate(a.date)).map((s,idx)=>{
                   const catColor = getCatColor(s.category, budget);
                   return (
                   <SwipeableRow key={s.id} hintOnMount={idx===0}
@@ -714,7 +753,7 @@ export default function MeFirst() {
                           <div style={{fontFamily:T.sans,fontSize:14,fontWeight:500,marginBottom:2}}>{s.name||s.category}</div>
                           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                             <span style={{fontFamily:T.sans,fontSize:11,color:T.inkLight}}>
-                              {new Date(s.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
+                              {localDate(s.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
                             </span>
                             <span style={{fontFamily:T.sans,fontSize:11,color:catColor,fontWeight:500}}>{s.category}</span>
                             {s.type&&s.type!=="Expense"&&<TypeBadge type={s.type}/>}
@@ -1134,7 +1173,7 @@ export default function MeFirst() {
               <NumInput value={paydayDay} onChange={v=>setPaydayDay(Math.min(28,Math.max(1,Math.round(v||1))))} placeholder="e.g. 6"/>
             </Field>
             <div style={{background:T.paper,borderRadius:10,padding:"10px 14px",fontFamily:T.sans,fontSize:13,color:T.inkLight}}>
-              Next payday: <strong style={{color:T.ink}}>{new Date(nextPayday).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"long"})}</strong>
+              Next payday: <strong style={{color:T.ink}}>{localDate(nextPayday).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"long"})}</strong>
               <div style={{fontSize:11,marginTop:3,opacity:0.7}}>Weekend → moved to previous Friday automatically</div>
             </div>
             <Btn variant="primary" style={{width:"100%",marginTop:4}} onClick={()=>{setSheet(null);setConfirmClear(false);setSettingsPage("general");}}>Done</Btn>
